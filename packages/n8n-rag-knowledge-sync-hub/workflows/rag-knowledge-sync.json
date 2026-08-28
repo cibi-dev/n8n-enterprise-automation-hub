@@ -1,0 +1,111 @@
+{
+  "name": "RAG Codebase Knowledge Synchronizer & Obsidian Vault Indexer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rag-sync",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook Git Commit Ingestion",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "id": "node-webhook-rag-01"
+    },
+    {
+      "parameters": {
+        "command": "python3 -m rag_sync.cli scan-and-sync \"{{ $json.body.repo_path || '/home/cibi/Proyectos' }}\" --db /tmp/codebase_rag.db --obsidian-out /tmp/codebase-index.md"
+      },
+      "name": "AST Chunking & Vector DB Sync",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "id": "node-exec-rag-02"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "options": {},
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "chat_id",
+              "value": "={{ $env.TELEGRAM_CHAT_ID }}"
+            },
+            {
+              "name": "text",
+              "value": "=🧠 *CODEBASE RAG KNOWLEDGE SYNCED*\\nRepository: `{{ JSON.parse($json.stdout).repository_path }}`\\nFiles Scanned: *{{ JSON.parse($json.stdout).total_files_scanned }}*\\nChunks Indexed: *{{ JSON.parse($json.stdout).new_chunks_indexed }}* ({{ JSON.parse($json.stdout).skipped_duplicates }} skipped)\\nLatency: *{{ JSON.parse($json.stdout).execution_time_ms }} ms*\\nObsidian Vault: Updated ✅"
+            },
+            {
+              "name": "parse_mode",
+              "value": "Markdown"
+            }
+          ]
+        }
+      },
+      "name": "Dispatch Sync Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 200],
+      "id": "node-alert-rag-03"
+    },
+    {
+      "parameters": {
+        "options": {},
+        "respondWith": "json",
+        "responseBody": "={{ JSON.parse($json.stdout) }}"
+      },
+      "name": "Respond 200 Synced",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [680, 400],
+      "id": "node-respond-rag-04"
+    }
+  ],
+  "connections": {
+    "Webhook Git Commit Ingestion": {
+      "main": [
+        [
+          {
+            "node": "AST Chunking & Vector DB Sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AST Chunking & Vector DB Sync": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Sync Notification",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond 200 Synced",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "rag"
+    },
+    {
+      "name": "vectordb"
+    },
+    {
+      "name": "obsidian"
+    }
+  ]
+}

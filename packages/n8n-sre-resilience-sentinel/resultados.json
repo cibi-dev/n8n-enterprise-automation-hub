@@ -1,0 +1,5 @@
+{
+  "atomic_rollback_avg_latency_ms": 0.039,
+  "atomic_rollbacks_per_sec": 25593.2,
+  "health_updates_per_sec": 58688.22
+}

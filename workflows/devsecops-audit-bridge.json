@@ -1,0 +1,209 @@
+{
+  "name": "DevSecOps Audit Webhook Bridge & Compliance Archiver",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "devsecops-audit",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook CI Audit Ingestion",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "id": "node-webhook-01"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cryptographic HMAC-SHA256 constant-time verification\nconst crypto = require('crypto');\n\nconst rawBody = $input.first().json.body;\nconst headers = $input.first().json.headers;\nconst secret = $env.WEBHOOK_SECRET || 'local-dev-secret-key-1234';\n\nconst sigHeader = headers['x-hub-signature-256'] || headers['x-signature-sha256'] || '';\nconst cleanSig = sigHeader.replace(/^sha256=/, '').trim();\n\nconst computedSig = crypto.createHmac('sha256', secret)\n  .update(typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody))\n  .digest('hex');\n\nlet isValid = false;\ntry {\n  const sigBuf = Buffer.from(cleanSig, 'hex');\n  const compBuf = Buffer.from(computedSig, 'hex');\n  isValid = (sigBuf.length === compBuf.length) && crypto.timingSafeEqual(sigBuf, compBuf);\n} catch (e) {\n  isValid = false;\n}\n\nreturn [{ json: { isValidSignature: isValid, payload: rawBody } }];"
+      },
+      "name": "Verify HMAC-SHA256 Signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "id": "node-verify-hmac-02"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isValidSignature }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Signature Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "id": "node-if-valid-03"
+    },
+    {
+      "parameters": {
+        "command": "python3 -m bridge.cli process-audit --payload /tmp/audit_input.json --db /tmp/devsecops_audit.db"
+      },
+      "name": "Process Audit & Merkle Storage",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [900, 200],
+      "id": "node-exec-audit-04"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ JSON.parse($json.stdout).is_compliant }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Is Compliant?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1120, 200],
+      "id": "node-if-compliant-05"
+    },
+    {
+      "parameters": {
+        "options": {},
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'rejected', message: 'Unauthorized HMAC signature failure' } }}"
+      },
+      "name": "Respond 401 Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [900, 420],
+      "id": "node-respond-401-06"
+    },
+    {
+      "parameters": {
+        "options": {},
+        "respondWith": "json",
+        "responseBody": "={{ JSON.parse($json.stdout) }}"
+      },
+      "name": "Respond 200 Compliant",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1360, 100],
+      "id": "node-respond-200-07"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "options": {},
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "chat_id",
+              "value": "={{ $env.TELEGRAM_CHAT_ID }}"
+            },
+            {
+              "name": "text",
+              "value": "=🚨 *DevSecOps Gate Violation Alert*\\nRepository: `{{ JSON.parse($node['Process Audit & Merkle Storage'].json.stdout).storage_id }}`\\nSummary: {{ JSON.parse($node['Process Audit & Merkle Storage'].json.stdout).summary }}"
+            },
+            {
+              "name": "parse_mode",
+              "value": "Markdown"
+            }
+          ]
+        }
+      },
+      "name": "Dispatch Security Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1360, 300],
+      "id": "node-alert-08"
+    }
+  ],
+  "connections": {
+    "Webhook CI Audit Ingestion": {
+      "main": [
+        [
+          {
+            "node": "Verify HMAC-SHA256 Signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify HMAC-SHA256 Signature": {
+      "main": [
+        [
+          {
+            "node": "Signature Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature Valid?": {
+      "main": [
+        [
+          {
+            "node": "Process Audit & Merkle Storage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 401 Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Audit & Merkle Storage": {
+      "main": [
+        [
+          {
+            "node": "Is Compliant?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Compliant?": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 Compliant",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Dispatch Security Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "devsecops"
+    },
+    {
+      "name": "audit"
+    },
+    {
+      "name": "merkle"
+    }
+  ]
+}

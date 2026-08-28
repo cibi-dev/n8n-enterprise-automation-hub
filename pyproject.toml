@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "n8n-enterprise-automation-hub"
+version = "1.0.0"
+description = "Enterprise n8n Workflow Automation Hub & Orchestrator for DevSecOps, Threat Intel, Forensics, SRE, and RAG Knowledge Base"
+readme = "README.md"
+authors = [{ name = "cibi-dev", email = "cibi@users.noreply.github.com" }]
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = [
+    "n8n",
+    "automation",
+    "workflow",
+    "devsecops",
+    "osint",
+    "forensics",
+    "sre",
+    "rag",
+    "incident-response",
+    "webhook-bridge",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "Topic :: System :: Monitoring",
+    "Topic :: Security",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "pydantic>=2.0.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "bandit>=1.7.0",
+    "mypy>=1.10.0",
+]
+
+[project.scripts]
+n8n-hub = "cli:main"
+
+[tool.setuptools]
+py-modules = ["cli"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [
+    ".",
+    "packages/n8n-devsecops-audit-bridge/src",
+    "packages/n8n-osint-threat-feed-enricher/src",
+    "packages/n8n-forensic-incident-triage/src",
+    "packages/n8n-sre-resilience-sentinel/src",
+    "packages/n8n-rag-knowledge-sync-hub/src",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.bandit]
+exclude_dirs = ["tests", "venv", ".venv", ".pytest_cache", ".mypy_cache"]
+skips = ["B101"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_return_any = false
+disallow_untyped_defs = false
+check_untyped_defs = true
+exclude = [
+    '^tests/',
+    '^benchmarks/',
+    '^packages/.*/tests/',
+    '^packages/.*/benchmarks/',
+    '^packages/.*/examples/',
+    '^\.venv/',
+]

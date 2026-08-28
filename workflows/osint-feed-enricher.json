@@ -1,0 +1,212 @@
+{
+  "name": "OSINT Security Threat Feed Aggregator & MinHash Deduplicator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Hourly Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [220, 300],
+      "id": "node-schedule-01"
+    },
+    {
+      "parameters": {
+        "url": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+        "options": {}
+      },
+      "name": "Fetch CISA KEV Feed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [440, 200],
+      "id": "node-cisa-fetch-02"
+    },
+    {
+      "parameters": {
+        "url": "https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=25",
+        "options": {}
+      },
+      "name": "Fetch NVD CVE Feed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [440, 400],
+      "id": "node-nvd-fetch-03"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate raw feeds into JSON file for CLI MinHash processing\nconst fs = require('fs');\nconst cisaData = $items('Fetch CISA KEV Feed')[0].json;\nconst nvdData = $items('Fetch NVD CVE Feed')[0].json;\n\nfs.writeFileSync('/tmp/raw_cisa.json', JSON.stringify(cisaData));\nfs.writeFileSync('/tmp/raw_nvd.json', JSON.stringify(nvdData));\n\nreturn [{ json: { status: 'feeds_saved_for_dedup' } }];"
+      },
+      "name": "Prepare Feed Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 300],
+      "id": "node-prep-04"
+    },
+    {
+      "parameters": {
+        "command": "python3 -c '\nimport json, sys\nfrom enricher.parsers import parse_cisa_kev_catalog, parse_nvd_cve_feed\nfrom enricher.cache import ThreatFeedCache\n\nc_adv = parse_cisa_kev_catalog(open(\"/tmp/raw_cisa.json\").read())\nn_adv = parse_nvd_cve_feed(open(\"/tmp/raw_nvd.json\").read())\ncache = ThreatFeedCache(\"/tmp/osint_threats.db\")\ndigest = cache.deduplicate_stream(c_adv + n_adv, similarity_threshold=0.70)\nprint(json.dumps(digest.model_dump()))\n'"
+      },
+      "name": "MinHash Deduplication & Cache",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [880, 300],
+      "id": "node-minhash-exec-05"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ JSON.parse($json.stdout).critical_count }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "Has Critical / Exploited Threats?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1100, 300],
+      "id": "node-if-critical-06"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "options": {},
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "chat_id",
+              "value": "={{ $env.TELEGRAM_CHAT_ID }}"
+            },
+            {
+              "name": "text",
+              "value": "=🚨 *OSINT CISA/NVD Threat Briefing*\\nFound {{ JSON.parse($node['MinHash Deduplication & Cache'].json.stdout).critical_count }} critical/actively exploited CVEs in the last hour!\\nUnique Threats: {{ JSON.parse($node['MinHash Deduplication & Cache'].json.stdout).unique_count }}"
+            },
+            {
+              "name": "parse_mode",
+              "value": "Markdown"
+            }
+          ]
+        }
+      },
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1320, 200],
+      "id": "node-telegram-alert-07"
+    },
+    {
+      "parameters": {
+        "command": "python3 -c '\nimport json, os, datetime\nfrom enricher.models import ThreatDigest\nfrom enricher.formatter import format_obsidian_digest\n\ndata = json.loads(\"\"\"{{ $node[\"MinHash Deduplication & Cache\"].json.stdout }}\"\"\")\ndigest = ThreatDigest.model_validate(data)\nmd = format_obsidian_digest(digest)\n\ntoday = datetime.date.today().isoformat()\nvault_dir = os.path.expanduser(\"~/Personal/cibi/01_Inbox/daily\")\nos.makedirs(vault_dir, exist_ok=True)\nwith open(f\"{vault_dir}/{today}.md\", \"a\", encoding=\"utf-8\") as f:\n    f.write(\"\\n\\n\" + md)\n'"
+      },
+      "name": "Sync to Obsidian Vault",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1320, 400],
+      "id": "node-obsidian-sync-08"
+    }
+  ],
+  "connections": {
+    "Hourly Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch CISA KEV Feed",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch NVD CVE Feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch CISA KEV Feed": {
+      "main": [
+        [
+          {
+            "node": "Prepare Feed Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch NVD CVE Feed": {
+      "main": [
+        [
+          {
+            "node": "Prepare Feed Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Feed Files": {
+      "main": [
+        [
+          {
+            "node": "MinHash Deduplication & Cache",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MinHash Deduplication & Cache": {
+      "main": [
+        [
+          {
+            "node": "Has Critical / Exploited Threats?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Critical / Exploited Threats?": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sync to Obsidian Vault",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "osint"
+    },
+    {
+      "name": "threat-intel"
+    },
+    {
+      "name": "minhash"
+    }
+  ]
+}

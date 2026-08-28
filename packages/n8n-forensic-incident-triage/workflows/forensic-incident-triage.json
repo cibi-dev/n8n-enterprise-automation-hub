@@ -1,0 +1,167 @@
+{
+  "name": "Forensic Incident Triage & Evidence Custody Bridge",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "forensic-triage",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook Incident Ingestion",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "id": "node-webhook-triage-01"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare raw text file for Python forensic processing\nconst fs = require('fs');\nconst body = $input.first().json.body;\nconst rawText = body.text || body.narrative || JSON.stringify(body);\nconst incId = body.incident_id || 'INC-' + Date.now();\nconst title = body.title || 'Cybercrime Report';\n\nfs.writeFileSync('/tmp/raw_incident.txt', rawText);\n\nreturn [{ json: { incident_id: incId, title: title } }];"
+      },
+      "name": "Extract & Buffer Narrative",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "id": "node-buffer-narrative-02"
+    },
+    {
+      "parameters": {
+        "command": "python3 -m triage.cli triage /tmp/raw_incident.txt --id \"{{ $json.incident_id }}\" --title \"{{ $json.title }}\" --db /tmp/forensic_triage.db"
+      },
+      "name": "PII Sanitization & Custody Sealing",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "id": "node-triage-exec-03"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ JSON.parse($json.stdout).priority }}",
+              "value2": "critical"
+            }
+          ]
+        }
+      },
+      "name": "Is Critical Incident?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 300],
+      "id": "node-if-critical-04"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "options": {},
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "chat_id",
+              "value": "={{ $env.TELEGRAM_CHAT_ID }}"
+            },
+            {
+              "name": "text",
+              "value": "=🚨 *CRITICAL FORENSIC INCIDENT TRIAGE*\\nID: `{{ JSON.parse($node['PII Sanitization & Custody Sealing'].json.stdout).incident_id }}`\\nCategory: *{{ JSON.parse($node['PII Sanitization & Custody Sealing'].json.stdout).crime_category }}*\\nCustody Hash: `{{ JSON.parse($node['PII Sanitization & Custody Sealing'].json.stdout).custody_sha256 }}`\\nSummary: {{ JSON.parse($node['PII Sanitization & Custody Sealing'].json.stdout).sanitized_text.slice(0, 200) }}..."
+            },
+            {
+              "name": "parse_mode",
+              "value": "Markdown"
+            }
+          ]
+        }
+      },
+      "name": "Dispatch Forensic Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1120, 200],
+      "id": "node-alert-triage-05"
+    },
+    {
+      "parameters": {
+        "options": {},
+        "respondWith": "json",
+        "responseBody": "={{ JSON.parse($json.stdout) }}"
+      },
+      "name": "Respond 200 Certified",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 400],
+      "id": "node-respond-triage-06"
+    }
+  ],
+  "connections": {
+    "Webhook Incident Ingestion": {
+      "main": [
+        [
+          {
+            "node": "Extract & Buffer Narrative",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract & Buffer Narrative": {
+      "main": [
+        [
+          {
+            "node": "PII Sanitization & Custody Sealing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PII Sanitization & Custody Sealing": {
+      "main": [
+        [
+          {
+            "node": "Is Critical Incident?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Critical Incident?": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Forensic Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond 200 Certified",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 200 Certified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "forensics"
+    },
+    {
+      "name": "triage"
+    },
+    {
+      "name": "iso-27037"
+    }
+  ]
+}

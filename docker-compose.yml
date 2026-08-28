@@ -1,0 +1,53 @@
+version: "3.8"
+
+services:
+  n8n-hub:
+    image: n8nio/n8n:latest
+    container_name: n8n-enterprise-hub
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=false
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=UTC
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=168
+      - DB_TYPE=sqlite
+      - N8N_CUSTOM_EXTENSIONS=/data/custom
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/workflows:ro
+      - ./data:/data:rw
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:5678/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cibi-dev/n8n-enterprise-automation-hub:latest
+    container_name: n8n-automation-runner
+    restart: "no"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - N8N_WEBHOOK_BASE_URL=http://n8n-hub:5678/webhook
+      - WEBHOOK_SECRET=production-secret-token-xyz
+    volumes:
+      - ./workflows:/app/workflows:ro
+      - ./data:/app/data:rw
+    depends_on:
+      - n8n-hub
+    command: ["demo"]
+
+volumes:
+  n8n_data:
+    driver: local

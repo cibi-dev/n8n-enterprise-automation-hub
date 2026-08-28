@@ -1,0 +1,126 @@
+{
+  "name": "SRE Resilience Sentinel & Automated Rollback",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 30
+            }
+          ]
+        }
+      },
+      "name": "30-Second Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "id": "node-sched-sentinel-01"
+    },
+    {
+      "parameters": {
+        "command": "python3 -m sentinel.cli check-and-remediate --url http://127.0.0.1:8080/healthz --service api-gateway --link-path /tmp/app_current --slots-dir /tmp/app_slots --threshold 3 --db /tmp/sre_health.db"
+      },
+      "name": "Check Health & Auto-Remediate",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "id": "node-exec-sentinel-02"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ JSON.parse($json.stdout).rollback_executed }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Was Rollback Triggered?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "id": "node-if-rollback-03"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "options": {},
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "chat_id",
+              "value": "={{ $env.TELEGRAM_CHAT_ID }}"
+            },
+            {
+              "name": "text",
+              "value": "=🚨 *SRE AUTO-REMEDIATION ROLLBACK EXECUTED*\\nService: `{{ JSON.parse($node['Check Health & Auto-Remediate'].json.stdout).health_state.service_name }}`\\nSwitched: `{{ JSON.parse($node['Check Health & Auto-Remediate'].json.stdout).rollback_action.previous_slot }}` ➡️ `{{ JSON.parse($node['Check Health & Auto-Remediate'].json.stdout).rollback_action.target_slot }}`\\nLatency: *{{ JSON.parse($node['Check Health & Auto-Remediate'].json.stdout).rollback_action.execution_time_ms }} ms*\\nReason: {{ JSON.parse($node['Check Health & Auto-Remediate'].json.stdout).rollback_action.reason }}"
+            },
+            {
+              "name": "parse_mode",
+              "value": "Markdown"
+            }
+          ]
+        }
+      },
+      "name": "Dispatch SRE Emergency Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 200],
+      "id": "node-alert-sre-04"
+    }
+  ],
+  "connections": {
+    "30-Second Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Check Health & Auto-Remediate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Health & Auto-Remediate": {
+      "main": [
+        [
+          {
+            "node": "Was Rollback Triggered?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Was Rollback Triggered?": {
+      "main": [
+        [
+          {
+            "node": "Dispatch SRE Emergency Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "sre"
+    },
+    {
+      "name": "sentinel"
+    },
+    {
+      "name": "blue-green"
+    }
+  ]
+}
